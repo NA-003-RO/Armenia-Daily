@@ -1,0 +1,187 @@
+@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+
+set "COMPOSE_FILE=%~dp0docker-compose.yml"
+if not exist "%COMPOSE_FILE%" set "COMPOSE_FILE=%~dp0Armenia-Daily\docker-compose.yml"
+
+set "DB_FILE=%~dp0api\db.json"
+if not exist "%DB_FILE%" set "DB_FILE=%~dp0Armenia-Daily\api\db.json"
+
+set "DOCKER_DESKTOP_EXE=%LocalAppData%\Programs\DockerDesktop\Docker Desktop.exe"
+if not exist "%DOCKER_DESKTOP_EXE%" set "DOCKER_DESKTOP_EXE=C:\Users\TEVZI\AppData\Local\Programs\DockerDesktop\Docker Desktop.exe"
+
+set "APP_URL=http://localhost:8080"
+
+:MENU
+cls
+echo ==================================================
+echo             Armenia-Daily - STACK MANAGER
+echo ==================================================
+echo   [1] START
+echo   [2] STOP
+echo   [3] RESTART
+echo   [4] START WITH BUILD
+echo   [5] RESTART WITH BUILD
+echo   [0] EXIT
+echo ==================================================
+set /p "choice=SELECT AN OPTION (0-5): "
+
+if "%choice%"=="1" goto DO_START
+if "%choice%"=="2" goto DO_STOP
+if "%choice%"=="3" goto DO_RESTART
+if "%choice%"=="4" goto DO_START_BUILD
+if "%choice%"=="5" goto DO_RESTART_BUILD
+if "%choice%"=="0" goto END
+
+echo Invalid selection.
+pause
+goto MENU
+
+:CENTER
+setlocal
+set "txt=%~1"
+for /f "usebackq delims=" %%W in (`powershell -NoProfile -Command "$w = $Host.UI.RawUI.WindowSize.Width; if ($w -lt 1) { $w = 80 }; $t = '%txt%'; $pad = [math]::Max(0, [math]::Floor(($w - $t.Length) / 2)); (' ' * $pad) + $t"`) do echo(%%W
+endlocal & exit /b 0
+
+:ENSURE_DOCKER
+docker info >nul 2>&1
+if not errorlevel 1 (
+  echo Docker Engine is already running.
+  exit /b 0
+)
+
+if not exist "%DOCKER_DESKTOP_EXE%" (
+  echo [ERROR] Could not find "%DOCKER_DESKTOP_EXE%".
+  exit /b 1
+)
+
+echo Starting Docker Desktop...
+start "" "%DOCKER_DESKTOP_EXE%"
+
+echo Waiting for Docker Engine to become ready...
+set /a tries=0
+:WAIT_DOCKER
+timeout /t 2 /nobreak >nul
+docker info >nul 2>&1
+if not errorlevel 1 (
+  echo Docker Engine is ready.
+  exit /b 0
+)
+set /a tries+=1
+if %tries% lss 60 goto WAIT_DOCKER
+
+echo [ERROR] Docker Engine did not start within 120 seconds.
+exit /b 1
+
+:STOP_DOCKER_DESKTOP
+echo Closing Docker Desktop, json-server and background processes...
+taskkill /IM "Docker Desktop.exe" /T /F >nul 2>&1
+taskkill /IM "Docker Desktop Backend.exe" /T /F >nul 2>&1
+taskkill /IM "com.docker.backend.exe" /T /F >nul 2>&1
+taskkill /IM "com.docker.proxy.exe" /T /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Armenia-Daily-json-server*" /T /F >nul 2>&1
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'json-server.*3002' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+
+wsl.exe -t docker-desktop >nul 2>&1
+wsl.exe -t docker-desktop-data >nul 2>&1
+
+timeout /t 2 /nobreak >nul
+tasklist /FI "IMAGENAME eq Docker Desktop.exe" 2>nul | find /I "Docker Desktop.exe" >nul
+if not errorlevel 1 (
+  echo [WARNING] Docker Desktop.exe is still running.
+) else (
+  echo Docker Desktop is completely closed.
+)
+exit /b 0
+
+:DO_START
+echo.
+call :CENTER "WELCOME"
+call :ENSURE_DOCKER
+if errorlevel 1 goto ERR
+
+echo [START] Starting containers...
+docker compose -f "%COMPOSE_FILE%" up -d
+if errorlevel 1 goto ERR
+
+echo [START] Starting json-server on port 3002 in background...
+start "" /b npx --yes json-server "%DB_FILE%" --port 3002 >nul 2>&1
+
+echo [START] Waiting for services to become ready...
+powershell -NoProfile -Command "$deadline = (Get-Date).AddSeconds(20); while ((Get-Date) -lt $deadline) { try { $r = Invoke-WebRequest -Uri 'http://localhost:8080' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -lt 500) { break } } catch {}; Start-Sleep -Milliseconds 800 }" >nul 2>&1
+
+echo [START] Opening %APP_URL%...
+start "" "%APP_URL%"
+timeout /t 1 /nobreak >nul
+goto DONE
+
+:DO_STOP
+echo.
+docker info >nul 2>&1
+if not errorlevel 1 (
+  echo [STOP] Stopping and removing containers...
+  docker compose -f "%COMPOSE_FILE%" down
+  if errorlevel 1 goto ERR
+) else (
+  echo [STOP] Docker Engine is already stopped, skipping docker compose down.
+)
+
+call :STOP_DOCKER_DESKTOP
+goto DONE
+
+:DO_RESTART
+echo.
+call :ENSURE_DOCKER
+if errorlevel 1 goto ERR
+
+echo [RESTART] Restarting containers...
+docker compose -f "%COMPOSE_FILE%" restart
+if errorlevel 1 goto ERR
+goto DONE
+
+:DO_START_BUILD
+echo.
+call :CENTER "WELCOME"
+call :ENSURE_DOCKER
+if errorlevel 1 goto ERR
+
+echo [START WITH BUILD] Building and starting containers...
+docker compose -f "%COMPOSE_FILE%" up -d --build
+if errorlevel 1 goto ERR
+
+echo [START WITH BUILD] Opening %APP_URL%...
+start "" "%APP_URL%"
+
+echo [START WITH BUILD] Starting json-server on port 3002 in background...
+start "" /b npx --yes json-server "%DB_FILE%" --port 3002 >nul 2>&1
+timeout /t 1 /nobreak >nul
+goto DONE
+
+:DO_RESTART_BUILD
+echo.
+call :ENSURE_DOCKER
+if errorlevel 1 goto ERR
+
+echo [RESTART WITH BUILD] Rebuilding and recreating containers...
+docker compose -f "%COMPOSE_FILE%" up -d --build --force-recreate
+if errorlevel 1 goto ERR
+goto DONE
+
+:ERR
+echo.
+echo [ERROR] Command failed. Window will stay open until you press a key.
+pause
+goto MENU
+
+:DONE
+echo.
+echo [OK] Done. Window will stay open until you press a key.
+pause
+goto MENU
+
+:END
+echo.
+call :CENTER "GOODBYE"
+timeout /t 2 /nobreak >nul
+exit /b 0
