@@ -1,0 +1,49 @@
+services:
+  mock-api:
+    image: node:20-alpine
+    container_name: Armenia-Daily-api
+    working_dir: /app
+    volumes:
+      - ./api:/app
+    command: sh -c "npx json-server --watch db.json --host 0.0.0.0 --port 3001"
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/').then(() => process.exit(0)).catch(() => process.exit(1))\""]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: Armenia-Daily-ai
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: Armenia-Daily-web
+    ports:
+      - "8080:80"
+    depends_on:
+      mock-api:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

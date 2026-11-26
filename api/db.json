@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "defaultCity": "Yerevan",
+    "baseCurrency": "AMD",
+    "refreshIntervalSec": 60
+  },
+  "rates": [
+    { "id": "usd", "code": "USD", "buy": 385.5, "sell": 389.0 },
+    { "id": "eur", "code": "EUR", "buy": 415.0, "sell": 421.0 },
+    { "id": "rub", "code": "RUB", "buy": 3.9, "sell": 4.2 }
+  ],
+  "watchlist": [
+    { "id": "btc", "symbol": "BTC", "name": "Bitcoin" },
+    { "id": "eth", "symbol": "ETH", "name": "Ethereum" },
+    { "id": "usdt", "symbol": "USDT", "name": "Tether" },
+    { "id": "ton", "symbol": "TON", "name": "Toncoin" }
+  ]
+}
